@@ -77,7 +77,7 @@ CELEBA_DDPM_MODEL_ID = "google/ddpm-ema-celebahq-256"
 
 # Evaluation classifiers
 EVAL_GENDER_MODEL = "rizvandwiki/gender-classification"
-EVAL_AGE_MODEL = "nateraw/vit-age-classifier"
+EVAL_AGE_MODEL = "ibombonato/swin-age-classifier"
 EVAL_HAIR_MODEL = "londe33/hair_v02"
 
 # Wiener filters
@@ -228,19 +228,20 @@ def evaluate_gender(evaluator, images: list, target: str) -> float:
 
 
 def evaluate_age(evaluator, images: list, target: str) -> float:
+    """Evaluate age accuracy using TFG's mean probability per age group."""
     results = evaluator(images, top_k=10)
     correct = 0
     for result in results:
-        young_score = sum(p["score"] for p in result if any(x in p["label"].lower() for x in ["0-2", "3-9", "10-19", "20-29"]))
-        old_score = sum(p["score"] for p in result if any(x in p["label"].lower() for x in ["50-59", "60-69", "70", "more than"]))
-        if target == "young" and young_score > old_score:
-            correct += 1
-        elif target == "old" and old_score > young_score:
+        scores = {pred["label"]: pred["score"] for pred in result}
+        probs = [scores[evaluator.model.config.id2label[i]] for i in range(10)]
+        prediction = np.argmax([np.mean(probs[:3]), np.mean(probs[5:])])
+        if prediction == (0 if target == "young" else 1):
             correct += 1
     return correct / len(images)
 
 
 def evaluate_hair(evaluator, images: list, target: str) -> float:
+    """Evaluate hair color accuracy, mapping nonblond to TFG's black-hair target."""
     results = evaluator(images, top_k=5)
     correct = 0
     for result in results:
@@ -248,7 +249,7 @@ def evaluate_hair(evaluator, images: list, target: str) -> float:
         is_blond = "blond" in top_label or "blonde" in top_label or "yellow" in top_label
         if target == "blond" and is_blond:
             correct += 1
-        elif target == "nonblond" and not is_blond:
+        elif target == "nonblond" and "black" in top_label:
             correct += 1
     return correct / len(images)
 
@@ -268,7 +269,7 @@ def evaluate_combo(evaluators: dict, images: list, combo_name: str) -> Dict[str,
     elif "nonblond" in combo_name:
         results["hair"] = evaluate_hair(evaluators["hair"], images, "nonblond")
     if len(results) >= 2:
-        results["combined"] = float(np.prod(list(results.values())))
+        results["combined"] = float(np.mean(list(results.values())))
     return results
 
 
